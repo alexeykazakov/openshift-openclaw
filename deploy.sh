@@ -42,6 +42,10 @@ Required environment:
 
   Export at least one provider API key (for first deploy):
     ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY
+
+  Optional (Vertex AI):
+    GCP_SA_KEY_FILE    Path to a GCP service account JSON key file
+    GCP_PROJECT_ID     GCP project ID (required when using ADC user credentials)
 HELP
       exit 0
       ;;
@@ -95,6 +99,7 @@ if [[ "$MODE" == "delete" ]]; then
   echo "Deleting OpenClaw resources from namespace '$NS'..."
   oc delete -k "$MANIFESTS" -n "$NS" --ignore-not-found
   oc delete secret openclaw-secrets -n "$NS" --ignore-not-found
+  oc delete secret openclaw-gcp-credentials -n "$NS" --ignore-not-found
   echo "Done."
   exit 0
 fi
@@ -175,6 +180,33 @@ _apply_secret() {
 }
 
 # ---------------------------------------------------------------------------
+# Create and apply GCP credentials Secret (Vertex AI)
+# ---------------------------------------------------------------------------
+_apply_gcp_secret() {
+  local KEY_FILE="$1"
+  [[ -f "$KEY_FILE" ]] || { echo "GCP key file not found: $KEY_FILE" >&2; exit 1; }
+
+  local GCP_ARGS=(
+    --from-file=sa-key.json="$KEY_FILE"
+  )
+
+  if [[ -n "${GCP_PROJECT_ID:-}" ]]; then
+    GCP_ARGS+=( --from-literal=GOOGLE_CLOUD_PROJECT="$GCP_PROJECT_ID" )
+  fi
+
+  oc create secret generic openclaw-gcp-credentials \
+    -n "$NS" \
+    "${GCP_ARGS[@]}" \
+    --dry-run=client \
+    -o yaml | oc apply --server-side --field-manager=openclaw -f - >/dev/null
+
+  echo "GCP credentials secret created/updated in namespace '$NS'."
+  if [[ -n "${GCP_PROJECT_ID:-}" ]]; then
+    echo "  GCP project: $GCP_PROJECT_ID"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # --create-secret
 # ---------------------------------------------------------------------------
 if [[ "$MODE" == "create-secret" ]]; then
@@ -185,15 +217,22 @@ if [[ "$MODE" == "create-secret" ]]; then
       echo "  Found $key in environment"
     fi
   done
+  [[ -n "${GCP_SA_KEY_FILE:-}" ]] && { HAS_KEY=true; echo "  Found GCP_SA_KEY_FILE in environment"; }
 
   if ! $HAS_KEY; then
-    echo "No API keys found in environment. Export at least one and re-run:"
+    echo "No credentials found in environment. Export at least one and re-run:"
     echo "  export <PROVIDER>_API_KEY=\"...\"  (ANTHROPIC, GEMINI, OPENAI, or OPENROUTER)"
+    echo "  export GCP_SA_KEY_FILE=\"/path/to/sa-key.json\"  (Vertex AI)"
     echo "  ./deploy.sh --create-secret"
     exit 1
   fi
 
   _apply_secret
+
+  if [[ -n "${GCP_SA_KEY_FILE:-}" ]]; then
+    _apply_gcp_secret "$GCP_SA_KEY_FILE"
+  fi
+
   echo ""
   echo "Now run:"
   echo "  ./deploy.sh"
@@ -208,19 +247,25 @@ if ! oc get secret openclaw-secrets -n "$NS" &>/dev/null; then
   for key in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY; do
     [[ -n "${!key:-}" ]] && HAS_KEY=true
   done
+  [[ -n "${GCP_SA_KEY_FILE:-}" ]] && HAS_KEY=true
 
   if $HAS_KEY; then
     echo "Creating secret from environment..."
     _apply_secret
     echo ""
   else
-    echo "No secret found and no API keys in environment."
+    echo "No secret found and no credentials in environment."
     echo ""
-    echo "Export at least one provider API key and re-run:"
+    echo "Export at least one credential and re-run:"
     echo "  export <PROVIDER>_API_KEY=\"...\"  (ANTHROPIC, GEMINI, OPENAI, or OPENROUTER)"
+    echo "  export GCP_SA_KEY_FILE=\"/path/to/sa-key.json\"  (Vertex AI)"
     echo "  ./deploy.sh"
     exit 1
   fi
+fi
+
+if [[ -n "${GCP_SA_KEY_FILE:-}" ]]; then
+  _apply_gcp_secret "$GCP_SA_KEY_FILE"
 fi
 
 # ---------------------------------------------------------------------------
