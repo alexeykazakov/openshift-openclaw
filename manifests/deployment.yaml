@@ -100,6 +100,12 @@ spec:
                   name: openclaw-gcp-credentials
                   key: GOOGLE_CLOUD_PROJECT
                   optional: true
+            - name: GOOGLE_CLOUD_LOCATION
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw-gcp-credentials
+                  key: GOOGLE_CLOUD_LOCATION
+                  optional: true
           resources:
             requests:
               memory: 512Mi

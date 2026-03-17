@@ -22,9 +22,31 @@ The script creates a Secret (gateway token + API keys), applies the Kustomize ma
 
 ## Access
 
-Open the Route URL printed by the deploy script. Paste the gateway token into the Control UI to authenticate.
+### 1. Open the Route URL
 
-To retrieve the token later:
+Open the Route URL printed by the deploy script (e.g. `https://openclaw-my-namespace.apps.cluster.example.com`).
+
+### 2. Approve device pairing
+
+On first connection from a new browser you'll see **"pairing required"**. This is OpenClaw's device authentication — remote connections require a one-time approval.
+
+With the browser tab open (so the pairing request stays active), run:
+
+```bash
+# List pending pairing requests
+oc exec -n $OPENCLAW_NAMESPACE deployment/openclaw -- \
+  node /app/dist/index.js devices list
+
+# Approve by request ID (copy from the Pending table above)
+oc exec -n $OPENCLAW_NAMESPACE deployment/openclaw -- \
+  node /app/dist/index.js devices approve <requestId>
+```
+
+Refresh the browser after approval. The device is remembered — you won't need to pair again unless you clear browser data or switch browsers.
+
+### 3. Authenticate with the gateway token
+
+Paste the gateway token into the Control UI. If you deployed with `--show-token`, it was printed in the terminal. Otherwise retrieve it:
 
 ```bash
 oc get secret openclaw-secrets -n $OPENCLAW_NAMESPACE \
@@ -43,9 +65,9 @@ export OPENAI_API_KEY="sk-..."
 
 Existing keys and the gateway token are preserved — only the keys you provide are updated.
 
-## Vertex AI (Anthropic / Gemini via GCP)
+## Vertex AI (Gemini via GCP)
 
-OpenClaw supports routing Anthropic and Gemini requests through Google Vertex AI using the `google-vertex` provider. This uses GCP Application Default Credentials (ADC) instead of direct API keys.
+OpenClaw supports Gemini models through Google Vertex AI using the `google-vertex` provider. This uses GCP Application Default Credentials (ADC) instead of direct API keys.
 
 ### 1. Create a GCP service account
 
@@ -56,6 +78,8 @@ In the GCP Console (or with `gcloud`), create a service account with the **Verte
 ```bash
 export OPENCLAW_NAMESPACE="my-namespace"
 export GCP_SA_KEY_FILE="/path/to/sa-key.json"
+export GCP_PROJECT_ID="my-gcp-project"
+export GCP_LOCATION="us-central1"          # optional, defaults to us-central1
 
 ./deploy.sh --kubeconfig /path/to/kubeconfig --show-token
 ```
@@ -64,15 +88,12 @@ The script creates a separate `openclaw-gcp-credentials` secret from the key fil
 
 ### 3. Configure the model provider
 
-After deploying, open the Control UI and set the default provider to `google-vertex`, or edit `manifests/configmap.yaml` to add models under the `google-vertex` provider, e.g.:
+The default model is set to `google-vertex/gemini-3-flash-preview` in `manifests/configmap.yaml`. Available Gemini models on Vertex AI include:
 
-```json
-{
-  "models": {
-    "default": "google-vertex/gemini-3-flash-preview"
-  }
-}
-```
+- `google-vertex/gemini-3-flash-preview` — fast, cost-effective (default)
+- `google-vertex/gemini-3.1-pro-preview` — most capable
+
+You can switch models in the Control UI or by editing the configmap.
 
 Then redeploy:
 
@@ -89,12 +110,13 @@ gcloud auth application-default login
 
 export OPENCLAW_NAMESPACE="my-namespace"
 export GCP_SA_KEY_FILE="$HOME/.config/gcloud/application_default_credentials.json"
-export GCP_PROJECT_ID="my-gcp-project"    # required for ADC user credentials
+export GCP_PROJECT_ID="my-gcp-project"    # required — ADC user credentials don't contain a project ID
+export GCP_LOCATION="us-central1"          # optional, defaults to us-central1
 
 ./deploy.sh --kubeconfig /path/to/kubeconfig --show-token
 ```
 
-`GCP_PROJECT_ID` is needed because personal ADC credentials don't contain a project ID (unlike service account keys which do). Switch to a proper service account key for production.
+`GCP_PROJECT_ID` is required because personal ADC credentials don't contain a project ID (unlike service account keys which do). `GCP_LOCATION` sets the Vertex AI region. Switch to a proper service account key for production.
 
 ### 4. Add the key to an existing deployment
 

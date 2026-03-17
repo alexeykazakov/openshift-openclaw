@@ -46,6 +46,7 @@ Required environment:
   Optional (Vertex AI):
     GCP_SA_KEY_FILE    Path to a GCP service account JSON key file
     GCP_PROJECT_ID     GCP project ID (required when using ADC user credentials)
+    GCP_LOCATION       GCP region for Vertex AI (default: us-central1)
 HELP
       exit 0
       ;;
@@ -194,6 +195,9 @@ _apply_gcp_secret() {
     GCP_ARGS+=( --from-literal=GOOGLE_CLOUD_PROJECT="$GCP_PROJECT_ID" )
   fi
 
+  local LOCATION="${GCP_LOCATION:-us-central1}"
+  GCP_ARGS+=( --from-literal=GOOGLE_CLOUD_LOCATION="$LOCATION" )
+
   oc create secret generic openclaw-gcp-credentials \
     -n "$NS" \
     "${GCP_ARGS[@]}" \
@@ -204,6 +208,7 @@ _apply_gcp_secret() {
   if [[ -n "${GCP_PROJECT_ID:-}" ]]; then
     echo "  GCP project: $GCP_PROJECT_ID"
   fi
+  echo "  GCP location: $LOCATION"
 }
 
 # ---------------------------------------------------------------------------
@@ -271,15 +276,37 @@ fi
 # ---------------------------------------------------------------------------
 # Deploy
 # ---------------------------------------------------------------------------
+_apply_manifests() {
+  local TMP_MANIFESTS
+  TMP_MANIFESTS="$(mktemp -d)"
+  cp -r "$MANIFESTS"/* "$TMP_MANIFESTS/"
+
+  local ROUTE_HOST
+  ROUTE_HOST="$(oc get route openclaw -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+  if [[ -n "$ROUTE_HOST" ]]; then
+    sed -i "s|OPENCLAW_ROUTE_HOST|$ROUTE_HOST|g" "$TMP_MANIFESTS/configmap.yaml"
+  fi
+
+  oc apply -k "$TMP_MANIFESTS" -n "$NS"
+  rm -rf "$TMP_MANIFESTS"
+}
+
 echo "Deploying to namespace '$NS'..."
-oc apply -k "$MANIFESTS" -n "$NS"
+_apply_manifests
+
+ROUTE_HOST="$(oc get route openclaw -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+
+# On first deploy the Route didn't exist before apply — re-apply now that the
+# hostname is known so the configmap gets the correct allowedOrigins.
+if [[ -n "$ROUTE_HOST" ]] && grep -q 'OPENCLAW_ROUTE_HOST' "$MANIFESTS/configmap.yaml"; then
+  _apply_manifests
+fi
+
 oc rollout restart deployment/openclaw -n "$NS" 2>/dev/null || true
 echo ""
 echo "Waiting for rollout..."
 oc rollout status deployment/openclaw -n "$NS" --timeout=300s
 echo ""
-
-ROUTE_HOST="$(oc get route openclaw -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null)"
 
 echo "Done. Access the gateway:"
 if [[ -n "$ROUTE_HOST" ]]; then
