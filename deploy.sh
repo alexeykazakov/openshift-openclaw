@@ -284,7 +284,7 @@ _apply_manifests() {
   local ROUTE_HOST
   ROUTE_HOST="$(oc get route openclaw -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
   if [[ -n "$ROUTE_HOST" ]]; then
-    sed -i "s|OPENCLAW_ROUTE_HOST|$ROUTE_HOST|g" "$TMP_MANIFESTS/configmap.yaml"
+    sed -i'' -e "s|OPENCLAW_ROUTE_HOST|$ROUTE_HOST|g" "$TMP_MANIFESTS/configmap.yaml"
   fi
 
   oc apply -k "$TMP_MANIFESTS" -n "$NS"
