@@ -23,7 +23,7 @@ data:
       "models": {
         "providers": {
           "google": {
-            "baseUrl": "http://openclaw-proxy:8080/gemini",
+            "baseUrl": "http://openclaw-proxy:8080/gemini/v1beta",
             "apiKey": "ah-ah-ah-you-didnt-say-the-magic-word",
             "models": []
           },

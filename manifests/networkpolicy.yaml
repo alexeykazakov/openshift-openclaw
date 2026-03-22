@@ -21,11 +21,19 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
-    # Allow DNS resolution (required for any Service lookup).
-    - ports:
+    # Allow DNS resolution. namespaceSelector targets CoreDNS pods
+    # in the openshift-dns namespace. Port 5353 is the actual listener
+    # port on OpenShift DNS pods (Service port 53 DNATs to pod 5353).
+    - to:
+        - namespaceSelector: {}
+      ports:
         - port: 53
           protocol: UDP
         - port: 53
+          protocol: TCP
+        - port: 5353
+          protocol: UDP
+        - port: 5353
           protocol: TCP
 ---
 # NetworkPolicy 2: Proxy pod egress restricted to known API endpoints + DNS.
@@ -50,8 +58,14 @@ spec:
         - port: 443
           protocol: TCP
     # Allow DNS resolution.
-    - ports:
+    - to:
+        - namespaceSelector: {}
+      ports:
         - port: 53
           protocol: UDP
         - port: 53
+          protocol: TCP
+        - port: 5353
+          protocol: UDP
+        - port: 5353
           protocol: TCP
