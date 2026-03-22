@@ -130,17 +130,19 @@ export GCP_SA_KEY_FILE="/path/to/sa-key.json"
 ./deploy.sh
 ```
 
-## Credential Proxy Architecture
+## Credential Proxy Architecture (OpenShell-inspired)
 
-All API keys and integration tokens are isolated from the OpenClaw pod. A separate nginx reverse proxy pod holds the credentials and injects auth headers on behalf of OpenClaw.
+All API keys and integration tokens are isolated from the OpenClaw pod. This mirrors how [OpenShell](https://github.com/NVIDIA/OpenShell) uses `inference.local` — a proxy endpoint that the agent calls instead of the real API, with credentials injected server-side.
+
+OpenClaw's `models.providers.*.baseUrl` in `openclaw.json` points each LLM provider at the proxy (e.g., `http://openclaw-proxy:8080/gemini`). A dummy `apiKey` value satisfies OpenClaw's auth resolver without exposing real credentials. The proxy replaces this with the real key before forwarding upstream.
 
 ```
 ┌─────────────────────────────┐       ┌───────────────────────────────────┐
 │  OpenClaw Pod               │       │  Proxy Pod                        │
 │                             │       │                                   │
-│  No API keys.               │──────>│  Has API keys (proxy-secrets).    │
-│  Calls proxy for inference. │ :8080 │  Injects auth headers.            │
-│                             │       │  Forwards to real API endpoints.  │
+│  No real API keys.          │──────>│  Has API keys (proxy-secrets).    │
+│  baseUrl -> proxy:8080      │ :8080 │  Replaces dummy key with real.    │
+│  apiKey = dummy placeholder │       │  Forwards to real API endpoints.  │
 └─────────────────────────────┘       └──────────────┬────────────────────┘
         │                                            │
         │ NetworkPolicy:                             │ Allowed: HTTPS to
@@ -156,7 +158,8 @@ All API keys and integration tokens are isolated from the OpenClaw pod. A separa
 | Layer | Protection |
 |-------|------------|
 | **Secret split** | `openclaw-secrets` has the gateway token only. `openclaw-proxy-secrets` has all API keys and is mounted only in the proxy pod. |
-| **Credential injection** | The proxy's nginx config injects auth headers per upstream (e.g., `x-api-key` for Anthropic, `Authorization: Bearer` for OpenAI). OpenClaw never sees the raw keys. |
+| **Provider baseUrl redirect** | `openclaw.json` sets each provider's `baseUrl` to the proxy. OpenClaw's SDK calls the proxy instead of the real API. This is equivalent to OpenShell's `inference.local` mechanism. |
+| **Credential injection** | The proxy's nginx config replaces the dummy auth header with real credentials per upstream (e.g., `x-api-key` for Anthropic, `Authorization: Bearer` for OpenAI). |
 | **NetworkPolicy** | The OpenClaw pod's egress is restricted to the proxy Service and DNS. Even if credentials were present, they could not be exfiltrated. |
 | **L7 method filtering** | Each proxy endpoint restricts HTTP methods (e.g., LLM APIs allow POST only; GitHub allows GET/HEAD/OPTIONS only). |
 
@@ -171,12 +174,13 @@ All API keys and integration tokens are isolated from the OpenClaw pod. A separa
 | GitHub API | `/github/` | `Authorization: token` | GET, HEAD, OPTIONS |
 | Telegram Bot | `/telegram/` | Token in URL path | POST |
 
-### Adding a new integration
+### Adding a new LLM provider
 
 1. Add the credential to `openclaw-proxy-secrets` (update `deploy.sh`)
 2. Add a `location` block to `manifests/proxy-configmap.yaml`
 3. Add the env var to `manifests/proxy-deployment.yaml`
-4. Redeploy with `./deploy.sh`
+4. Add a provider entry to `models.providers` in `manifests/configmap.yaml` with `baseUrl` pointing to the new proxy path and `apiKey: "ah-ah-ah-you-didnt-say-the-magic-word"`
+5. Redeploy with `./deploy.sh`
 
 ## Configure
 

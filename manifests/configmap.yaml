@@ -20,6 +20,30 @@ data:
         },
         "trustedProxies": ["10.0.0.0/8", "172.16.0.0/12"]
       },
+      "models": {
+        "providers": {
+          "google": {
+            "baseUrl": "http://openclaw-proxy:8080/gemini",
+            "apiKey": "ah-ah-ah-you-didnt-say-the-magic-word",
+            "models": []
+          },
+          "anthropic": {
+            "baseUrl": "http://openclaw-proxy:8080/anthropic",
+            "apiKey": "ah-ah-ah-you-didnt-say-the-magic-word",
+            "models": []
+          },
+          "openai": {
+            "baseUrl": "http://openclaw-proxy:8080/openai",
+            "apiKey": "ah-ah-ah-you-didnt-say-the-magic-word",
+            "models": []
+          },
+          "openrouter": {
+            "baseUrl": "http://openclaw-proxy:8080/openrouter",
+            "apiKey": "ah-ah-ah-you-didnt-say-the-magic-word",
+            "models": []
+          }
+        }
+      },
       "agents": {
         "defaults": {
           "model": { "primary": "google/gemini-3-flash-preview" },

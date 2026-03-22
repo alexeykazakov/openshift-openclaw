@@ -68,17 +68,6 @@ spec:
                 secretKeyRef:
                   name: openclaw-secrets
                   key: OPENCLAW_GATEWAY_TOKEN
-            # API keys are NOT injected here. They live in the proxy pod
-            # only (openclaw-proxy-secrets). OpenClaw reaches LLM providers
-            # through the credential proxy which injects auth headers.
-            - name: ANTHROPIC_BASE_URL
-              value: http://openclaw-proxy:8080/anthropic
-            - name: OPENAI_BASE_URL
-              value: http://openclaw-proxy:8080/openai
-            - name: GEMINI_BASE_URL
-              value: http://openclaw-proxy:8080/gemini
-            - name: OPENROUTER_BASE_URL
-              value: http://openclaw-proxy:8080/openrouter
           resources:
             requests:
               memory: 512Mi

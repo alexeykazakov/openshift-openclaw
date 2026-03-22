@@ -29,8 +29,8 @@ data:
     #   2. Injects the correct auth header from env vars
     #   3. Restricts HTTP methods where appropriate
     #
-    # OpenClaw calls this proxy via *_BASE_URL env vars; it never
-    # receives the raw API keys.
+    # OpenClaw calls this proxy via models.providers.*.baseUrl in
+    # openclaw.json; it never receives the raw API keys.
     # ---------------------------------------------------------------
 
     # Resolve upstream hostnames at request time, not at startup.
