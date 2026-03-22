@@ -310,6 +310,37 @@ _apply_manifests() {
     sed -i'' -e "s|OPENCLAW_ROUTE_HOST|$ROUTE_HOST|g" "$TMP_MANIFESTS/configmap.yaml"
   fi
 
+  # --- Pick default model based on available API keys ---
+  # Check env vars first, then fall back to what's already in the cluster secret.
+  local HAS_ANTHROPIC="${ANTHROPIC_API_KEY:-}"
+  local HAS_GEMINI="${GEMINI_API_KEY:-}"
+  local HAS_OPENAI="${OPENAI_API_KEY:-}"
+  local HAS_OPENROUTER="${OPENROUTER_API_KEY:-}"
+
+  if [[ -z "$HAS_ANTHROPIC$HAS_GEMINI$HAS_OPENAI$HAS_OPENROUTER" ]] \
+     && oc get secret openclaw-proxy-secrets -n "$NS" &>/dev/null; then
+    HAS_ANTHROPIC="$(oc get secret openclaw-proxy-secrets -n "$NS" -o jsonpath='{.data.ANTHROPIC_API_KEY}' 2>/dev/null | base64 -d)"
+    HAS_GEMINI="$(oc get secret openclaw-proxy-secrets -n "$NS" -o jsonpath='{.data.GEMINI_API_KEY}' 2>/dev/null | base64 -d)"
+    HAS_OPENAI="$(oc get secret openclaw-proxy-secrets -n "$NS" -o jsonpath='{.data.OPENAI_API_KEY}' 2>/dev/null | base64 -d)"
+    HAS_OPENROUTER="$(oc get secret openclaw-proxy-secrets -n "$NS" -o jsonpath='{.data.OPENROUTER_API_KEY}' 2>/dev/null | base64 -d)"
+  fi
+
+  local DEFAULT_MODEL=""
+  if [[ -n "$HAS_ANTHROPIC" ]]; then
+    DEFAULT_MODEL="anthropic/claude-sonnet-4-6"
+  elif [[ -n "$HAS_GEMINI" ]]; then
+    DEFAULT_MODEL="google/gemini-3-flash-preview"
+  elif [[ -n "$HAS_OPENAI" ]]; then
+    DEFAULT_MODEL="openai/gpt-4o"
+  elif [[ -n "$HAS_OPENROUTER" ]]; then
+    DEFAULT_MODEL="openrouter/anthropic/claude-sonnet-4-6"
+  fi
+
+  if [[ -n "$DEFAULT_MODEL" ]]; then
+    sed -i'' -e "s|\"primary\": \"[^\"]*\"|\"primary\": \"$DEFAULT_MODEL\"|g" "$TMP_MANIFESTS/configmap.yaml"
+    echo "Default model set to: $DEFAULT_MODEL"
+  fi
+
   oc apply -k "$TMP_MANIFESTS" -n "$NS"
   rm -rf "$TMP_MANIFESTS"
 }
