@@ -68,44 +68,6 @@ spec:
                 secretKeyRef:
                   name: openclaw-secrets
                   key: OPENCLAW_GATEWAY_TOKEN
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: openclaw-secrets
-                  key: ANTHROPIC_API_KEY
-                  optional: true
-            - name: OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: openclaw-secrets
-                  key: OPENAI_API_KEY
-                  optional: true
-            - name: GEMINI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: openclaw-secrets
-                  key: GEMINI_API_KEY
-                  optional: true
-            - name: OPENROUTER_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: openclaw-secrets
-                  key: OPENROUTER_API_KEY
-                  optional: true
-            - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: /home/node/.config/gcloud/sa-key.json
-            - name: GOOGLE_CLOUD_PROJECT
-              valueFrom:
-                secretKeyRef:
-                  name: openclaw-gcp-credentials
-                  key: GOOGLE_CLOUD_PROJECT
-                  optional: true
-            - name: GOOGLE_CLOUD_LOCATION
-              valueFrom:
-                secretKeyRef:
-                  name: openclaw-gcp-credentials
-                  key: GOOGLE_CLOUD_LOCATION
-                  optional: true
           resources:
             requests:
               memory: 512Mi
@@ -136,9 +98,6 @@ spec:
               mountPath: /home/node/.openclaw
             - name: tmp-volume
               mountPath: /tmp
-            - name: gcp-credentials
-              mountPath: /home/node/.config/gcloud
-              readOnly: true
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
@@ -155,7 +114,3 @@ spec:
             name: openclaw-config
         - name: tmp-volume
           emptyDir: {}
-        - name: gcp-credentials
-          secret:
-            secretName: openclaw-gcp-credentials
-            optional: true

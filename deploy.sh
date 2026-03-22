@@ -43,10 +43,18 @@ Required environment:
   Export at least one provider API key (for first deploy):
     ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY
 
+  Optional integrations:
+    GITHUB_TOKEN         GitHub personal access token (read-only proxy)
+    TELEGRAM_BOT_TOKEN   Telegram bot token
+
   Optional (Vertex AI):
     GCP_SA_KEY_FILE    Path to a GCP service account JSON key file
     GCP_PROJECT_ID     GCP project ID (required when using ADC user credentials)
     GCP_LOCATION       GCP region for Vertex AI (default: us-central1)
+
+  API keys are stored in a separate openclaw-proxy-secrets Secret and
+  mounted only in the credential proxy pod. The OpenClaw pod never
+  receives raw API keys.
 HELP
       exit 0
       ;;
@@ -100,84 +108,97 @@ if [[ "$MODE" == "delete" ]]; then
   echo "Deleting OpenClaw resources from namespace '$NS'..."
   oc delete -k "$MANIFESTS" -n "$NS" --ignore-not-found
   oc delete secret openclaw-secrets -n "$NS" --ignore-not-found
+  oc delete secret openclaw-proxy-secrets -n "$NS" --ignore-not-found
   oc delete secret openclaw-gcp-credentials -n "$NS" --ignore-not-found
   echo "Done."
   exit 0
 fi
 
 # ---------------------------------------------------------------------------
-# Create and apply Secret to the cluster
+# Create and apply Secrets to the cluster.
+#
+# openclaw-secrets        — gateway token only (mounted in OpenClaw pod)
+# openclaw-proxy-secrets  — all API keys (mounted in proxy pod only)
 # ---------------------------------------------------------------------------
 _apply_secret() {
   local TMP_DIR
-  local EXISTING_SECRET=false
-  local EXISTING_TOKEN=""
-  local ANTHROPIC_VALUE=""
-  local OPENAI_VALUE=""
-  local GEMINI_VALUE=""
-  local OPENROUTER_VALUE=""
-  local TOKEN
-  local SECRET_MANIFEST
   TMP_DIR="$(mktemp -d)"
   chmod 700 "$TMP_DIR"
   trap 'rm -rf "$TMP_DIR"' EXIT
 
+  # --- Gateway token (openclaw-secrets) ---
+  local EXISTING_TOKEN=""
   if oc get secret openclaw-secrets -n "$NS" &>/dev/null; then
-    EXISTING_SECRET=true
     EXISTING_TOKEN="$(oc get secret openclaw-secrets -n "$NS" -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d)"
-    ANTHROPIC_VALUE="$(oc get secret openclaw-secrets -n "$NS" -o jsonpath='{.data.ANTHROPIC_API_KEY}' 2>/dev/null | base64 -d)"
-    OPENAI_VALUE="$(oc get secret openclaw-secrets -n "$NS" -o jsonpath='{.data.OPENAI_API_KEY}' 2>/dev/null | base64 -d)"
-    GEMINI_VALUE="$(oc get secret openclaw-secrets -n "$NS" -o jsonpath='{.data.GEMINI_API_KEY}' 2>/dev/null | base64 -d)"
-    OPENROUTER_VALUE="$(oc get secret openclaw-secrets -n "$NS" -o jsonpath='{.data.OPENROUTER_API_KEY}' 2>/dev/null | base64 -d)"
   fi
-
-  TOKEN="${EXISTING_TOKEN:-$(openssl rand -hex 32)}"
-  ANTHROPIC_VALUE="${ANTHROPIC_API_KEY:-$ANTHROPIC_VALUE}"
-  OPENAI_VALUE="${OPENAI_API_KEY:-$OPENAI_VALUE}"
-  GEMINI_VALUE="${GEMINI_API_KEY:-$GEMINI_VALUE}"
-  OPENROUTER_VALUE="${OPENROUTER_API_KEY:-$OPENROUTER_VALUE}"
-  SECRET_MANIFEST="$TMP_DIR/secrets.yaml"
+  local TOKEN="${EXISTING_TOKEN:-$(openssl rand -hex 32)}"
 
   printf '%s' "$TOKEN" > "$TMP_DIR/OPENCLAW_GATEWAY_TOKEN"
-  printf '%s' "$ANTHROPIC_VALUE" > "$TMP_DIR/ANTHROPIC_API_KEY"
-  printf '%s' "$OPENAI_VALUE" > "$TMP_DIR/OPENAI_API_KEY"
-  printf '%s' "$GEMINI_VALUE" > "$TMP_DIR/GEMINI_API_KEY"
-  printf '%s' "$OPENROUTER_VALUE" > "$TMP_DIR/OPENROUTER_API_KEY"
-  chmod 600 \
-    "$TMP_DIR/OPENCLAW_GATEWAY_TOKEN" \
-    "$TMP_DIR/ANTHROPIC_API_KEY" \
-    "$TMP_DIR/OPENAI_API_KEY" \
-    "$TMP_DIR/GEMINI_API_KEY" \
-    "$TMP_DIR/OPENROUTER_API_KEY"
+  chmod 600 "$TMP_DIR/OPENCLAW_GATEWAY_TOKEN"
 
   oc create secret generic openclaw-secrets \
     -n "$NS" \
     --from-file=OPENCLAW_GATEWAY_TOKEN="$TMP_DIR/OPENCLAW_GATEWAY_TOKEN" \
-    --from-file=ANTHROPIC_API_KEY="$TMP_DIR/ANTHROPIC_API_KEY" \
-    --from-file=OPENAI_API_KEY="$TMP_DIR/OPENAI_API_KEY" \
-    --from-file=GEMINI_API_KEY="$TMP_DIR/GEMINI_API_KEY" \
-    --from-file=OPENROUTER_API_KEY="$TMP_DIR/OPENROUTER_API_KEY" \
     --dry-run=client \
-    -o yaml > "$SECRET_MANIFEST"
-  chmod 600 "$SECRET_MANIFEST"
+    -o yaml > "$TMP_DIR/gateway-secret.yaml"
+  chmod 600 "$TMP_DIR/gateway-secret.yaml"
+  oc apply --server-side --field-manager=openclaw -f "$TMP_DIR/gateway-secret.yaml" >/dev/null
 
-  oc apply --server-side --field-manager=openclaw -f "$SECRET_MANIFEST" >/dev/null
+  # --- API keys (openclaw-proxy-secrets) ---
+  local ANTHROPIC_VALUE="" OPENAI_VALUE="" GEMINI_VALUE="" OPENROUTER_VALUE=""
+  local GITHUB_VALUE="" TELEGRAM_VALUE=""
+
+  if oc get secret openclaw-proxy-secrets -n "$NS" &>/dev/null; then
+    ANTHROPIC_VALUE="$(oc get secret openclaw-proxy-secrets -n "$NS" -o jsonpath='{.data.ANTHROPIC_API_KEY}' 2>/dev/null | base64 -d)"
+    OPENAI_VALUE="$(oc get secret openclaw-proxy-secrets -n "$NS" -o jsonpath='{.data.OPENAI_API_KEY}' 2>/dev/null | base64 -d)"
+    GEMINI_VALUE="$(oc get secret openclaw-proxy-secrets -n "$NS" -o jsonpath='{.data.GEMINI_API_KEY}' 2>/dev/null | base64 -d)"
+    OPENROUTER_VALUE="$(oc get secret openclaw-proxy-secrets -n "$NS" -o jsonpath='{.data.OPENROUTER_API_KEY}' 2>/dev/null | base64 -d)"
+    GITHUB_VALUE="$(oc get secret openclaw-proxy-secrets -n "$NS" -o jsonpath='{.data.GITHUB_TOKEN}' 2>/dev/null | base64 -d)"
+    TELEGRAM_VALUE="$(oc get secret openclaw-proxy-secrets -n "$NS" -o jsonpath='{.data.TELEGRAM_BOT_TOKEN}' 2>/dev/null | base64 -d)"
+  fi
+
+  ANTHROPIC_VALUE="${ANTHROPIC_API_KEY:-$ANTHROPIC_VALUE}"
+  OPENAI_VALUE="${OPENAI_API_KEY:-$OPENAI_VALUE}"
+  GEMINI_VALUE="${GEMINI_API_KEY:-$GEMINI_VALUE}"
+  OPENROUTER_VALUE="${OPENROUTER_API_KEY:-$OPENROUTER_VALUE}"
+  GITHUB_VALUE="${GITHUB_TOKEN:-$GITHUB_VALUE}"
+  TELEGRAM_VALUE="${TELEGRAM_BOT_TOKEN:-$TELEGRAM_VALUE}"
+
+  local KEY_FILES=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY GITHUB_TOKEN TELEGRAM_BOT_TOKEN)
+  local KEY_VALS=("$ANTHROPIC_VALUE" "$OPENAI_VALUE" "$GEMINI_VALUE" "$OPENROUTER_VALUE" "$GITHUB_VALUE" "$TELEGRAM_VALUE")
+
+  local FROM_FILE_ARGS=()
+  for i in "${!KEY_FILES[@]}"; do
+    printf '%s' "${KEY_VALS[$i]}" > "$TMP_DIR/${KEY_FILES[$i]}"
+    chmod 600 "$TMP_DIR/${KEY_FILES[$i]}"
+    FROM_FILE_ARGS+=(--from-file="${KEY_FILES[$i]}=$TMP_DIR/${KEY_FILES[$i]}")
+  done
+
+  oc create secret generic openclaw-proxy-secrets \
+    -n "$NS" \
+    "${FROM_FILE_ARGS[@]}" \
+    --dry-run=client \
+    -o yaml > "$TMP_DIR/proxy-secret.yaml"
+  chmod 600 "$TMP_DIR/proxy-secret.yaml"
+  oc apply --server-side --field-manager=openclaw -f "$TMP_DIR/proxy-secret.yaml" >/dev/null
+
   rm -rf "$TMP_DIR"
   trap - EXIT
 
-  if $EXISTING_SECRET; then
-    echo "Secret updated in namespace '$NS'. Existing gateway token preserved."
+  if [[ -n "$EXISTING_TOKEN" ]]; then
+    echo "Secrets updated in namespace '$NS'. Existing gateway token preserved."
   else
-    echo "Secret created in namespace '$NS'."
+    echo "Secrets created in namespace '$NS'."
   fi
 
   if $SHOW_TOKEN; then
     echo "Gateway token: $TOKEN"
   else
-    echo "Gateway token stored in Secret only."
+    echo "Gateway token stored in openclaw-secrets."
     echo "Retrieve it with:"
     echo "  oc get secret openclaw-secrets -n $NS -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d && echo"
   fi
+  echo "API keys stored in openclaw-proxy-secrets (proxy pod only)."
 }
 
 # ---------------------------------------------------------------------------
@@ -216,7 +237,7 @@ _apply_gcp_secret() {
 # ---------------------------------------------------------------------------
 if [[ "$MODE" == "create-secret" ]]; then
   HAS_KEY=false
-  for key in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY; do
+  for key in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY GITHUB_TOKEN TELEGRAM_BOT_TOKEN; do
     if [[ -n "${!key:-}" ]]; then
       HAS_KEY=true
       echo "  Found $key in environment"
@@ -227,6 +248,7 @@ if [[ "$MODE" == "create-secret" ]]; then
   if ! $HAS_KEY; then
     echo "No credentials found in environment. Export at least one and re-run:"
     echo "  export <PROVIDER>_API_KEY=\"...\"  (ANTHROPIC, GEMINI, OPENAI, or OPENROUTER)"
+    echo "  export GITHUB_TOKEN=\"...\"  (GitHub integration)"
     echo "  export GCP_SA_KEY_FILE=\"/path/to/sa-key.json\"  (Vertex AI)"
     echo "  ./deploy.sh --create-secret"
     exit 1
@@ -249,13 +271,13 @@ fi
 # ---------------------------------------------------------------------------
 if ! oc get secret openclaw-secrets -n "$NS" &>/dev/null; then
   HAS_KEY=false
-  for key in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY; do
+  for key in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY GITHUB_TOKEN TELEGRAM_BOT_TOKEN; do
     [[ -n "${!key:-}" ]] && HAS_KEY=true
   done
   [[ -n "${GCP_SA_KEY_FILE:-}" ]] && HAS_KEY=true
 
   if $HAS_KEY; then
-    echo "Creating secret from environment..."
+    echo "Creating secrets from environment..."
     _apply_secret
     echo ""
   else
@@ -263,6 +285,7 @@ if ! oc get secret openclaw-secrets -n "$NS" &>/dev/null; then
     echo ""
     echo "Export at least one credential and re-run:"
     echo "  export <PROVIDER>_API_KEY=\"...\"  (ANTHROPIC, GEMINI, OPENAI, or OPENROUTER)"
+    echo "  export GITHUB_TOKEN=\"...\"  (GitHub integration)"
     echo "  export GCP_SA_KEY_FILE=\"/path/to/sa-key.json\"  (Vertex AI)"
     echo "  ./deploy.sh"
     exit 1
@@ -302,9 +325,11 @@ if [[ -n "$ROUTE_HOST" ]] && grep -q 'OPENCLAW_ROUTE_HOST' "$MANIFESTS/configmap
   _apply_manifests
 fi
 
+oc rollout restart deployment/openclaw-proxy -n "$NS" 2>/dev/null || true
 oc rollout restart deployment/openclaw -n "$NS" 2>/dev/null || true
 echo ""
 echo "Waiting for rollout..."
+oc rollout status deployment/openclaw-proxy -n "$NS" --timeout=120s
 oc rollout status deployment/openclaw -n "$NS" --timeout=300s
 echo ""
 
