@@ -13,7 +13,7 @@ Deploy [OpenClaw](https://github.com/openclaw/openclaw) to an existing OpenShift
 
 ```bash
 export OPENCLAW_NAMESPACE="my-namespace"
-export ANTHROPIC_API_KEY="sk-ant-..."      # or OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY
+export GEMINI_API_KEY="sk-ant-..."      # or OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY
 
 ./deploy.sh --kubeconfig /path/to/kubeconfig --show-token
 ```
@@ -165,14 +165,18 @@ OpenClaw's `models.providers.*.baseUrl` in `openclaw.json` points each LLM provi
 
 ### Supported integrations
 
-| Integration | Proxy path | Auth header | Methods allowed |
-|-------------|-----------|-------------|-----------------|
-| Anthropic | `/anthropic/` | `x-api-key` | POST |
-| OpenAI | `/openai/` | `Authorization: Bearer` | POST |
-| Gemini | `/gemini/` | `x-goog-api-key` | POST |
-| OpenRouter | `/openrouter/` | `Authorization: Bearer` | POST |
-| GitHub API | `/github/` | `Authorization: token` | GET, HEAD, OPTIONS |
-| Telegram Bot | `/telegram/` | Token in URL path | POST |
+| Integration | Proxy path | Auth header | Methods allowed | Status |
+|-------------|-----------|-------------|-----------------|--------|
+| Anthropic | `/anthropic/` | `x-api-key` | POST | Working via `models.providers` |
+| OpenAI | `/openai/` | `Authorization: Bearer` | POST | Working via `models.providers` |
+| Gemini | `/gemini/` | `x-goog-api-key` | POST | Working via `models.providers` |
+| OpenRouter | `/openrouter/` | `Authorization: Bearer` | POST | Working via `models.providers` |
+| GitHub API | `/github/` | `Authorization: token` | GET, HEAD, OPTIONS | Proxy ready, needs investigation |
+| Telegram Bot | `/telegram/` | Token in URL path | POST | Proxy ready, needs investigation |
+
+**LLM providers** are fully working. OpenClaw's `models.providers.*.baseUrl` redirects all model API traffic through the proxy.
+
+**Third-party services** (Telegram, GitHub, etc.) have proxy routes ready with credential injection, but OpenClaw's built-in channel/tool integrations do not yet support a `baseUrl` override to redirect them through the proxy. This requires further investigation. However, third-party service integrations can be configured via **skills** — a skill's instructions can direct the agent to call the proxy URL (e.g., `http://openclaw-proxy:8080/telegram/sendMessage`) instead of the upstream API directly, enabling credential-proxied access to these services without changes to OpenClaw core.
 
 ### Adding a new LLM provider
 

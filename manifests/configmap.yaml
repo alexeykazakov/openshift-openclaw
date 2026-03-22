@@ -49,7 +49,9 @@ data:
           "model": { "primary": "google/gemini-3-flash-preview" },
           "models": {
             "google/gemini-3.1-pro-preview": { "alias": "Gemini Pro" },
-            "google/gemini-3-flash-preview": { "alias": "Gemini Flash" }
+            "google/gemini-3-flash-preview": { "alias": "Gemini Flash" },
+            "anthropic/claude-sonnet-4-6": { "alias": "Claude Sonnet" },
+            "anthropic/claude-haiku-4-5": { "alias": "Claude Haiku" }
           },
           "workspace": "~/.openclaw/workspace"
         },
