@@ -18,7 +18,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."      # or OPENAI_API_KEY, GEMINI_API_KEY, 
 ./deploy.sh --kubeconfig /path/to/kubeconfig --show-token
 ```
 
-The script creates a Secret (gateway token + API keys), applies the Kustomize manifests, waits for the rollout, and prints the Route URL.
+The script creates two Secrets (gateway token in `openclaw-secrets`, API keys in `openclaw-proxy-secrets`), applies the Kustomize manifests, waits for the rollout, and prints the Route URL. API keys are only mounted in the credential proxy pod — the OpenClaw pod never receives them.
 
 ## Access
 
@@ -129,6 +129,54 @@ export GCP_SA_KEY_FILE="/path/to/sa-key.json"
 ./deploy.sh --create-secret
 ./deploy.sh
 ```
+
+## Credential Proxy Architecture
+
+All API keys and integration tokens are isolated from the OpenClaw pod. A separate nginx reverse proxy pod holds the credentials and injects auth headers on behalf of OpenClaw.
+
+```
+┌─────────────────────────────┐       ┌───────────────────────────────────┐
+│  OpenClaw Pod               │       │  Proxy Pod                        │
+│                             │       │                                   │
+│  No API keys.               │──────>│  Has API keys (proxy-secrets).    │
+│  Calls proxy for inference. │ :8080 │  Injects auth headers.            │
+│                             │       │  Forwards to real API endpoints.  │
+└─────────────────────────────┘       └──────────────┬────────────────────┘
+        │                                            │
+        │ NetworkPolicy:                             │ Allowed: HTTPS to
+        │ egress only to proxy + DNS                 │ api.anthropic.com,
+        │                                            │ api.openai.com, etc.
+        x blocked: direct internet                   │
+                                                     v
+                                              External LLM APIs
+```
+
+**How it protects credentials:**
+
+| Layer | Protection |
+|-------|------------|
+| **Secret split** | `openclaw-secrets` has the gateway token only. `openclaw-proxy-secrets` has all API keys and is mounted only in the proxy pod. |
+| **Credential injection** | The proxy's nginx config injects auth headers per upstream (e.g., `x-api-key` for Anthropic, `Authorization: Bearer` for OpenAI). OpenClaw never sees the raw keys. |
+| **NetworkPolicy** | The OpenClaw pod's egress is restricted to the proxy Service and DNS. Even if credentials were present, they could not be exfiltrated. |
+| **L7 method filtering** | Each proxy endpoint restricts HTTP methods (e.g., LLM APIs allow POST only; GitHub allows GET/HEAD/OPTIONS only). |
+
+### Supported integrations
+
+| Integration | Proxy path | Auth header | Methods allowed |
+|-------------|-----------|-------------|-----------------|
+| Anthropic | `/anthropic/` | `x-api-key` | POST |
+| OpenAI | `/openai/` | `Authorization: Bearer` | POST |
+| Gemini | `/gemini/` | `x-goog-api-key` | POST |
+| OpenRouter | `/openrouter/` | `Authorization: Bearer` | POST |
+| GitHub API | `/github/` | `Authorization: token` | GET, HEAD, OPTIONS |
+| Telegram Bot | `/telegram/` | Token in URL path | POST |
+
+### Adding a new integration
+
+1. Add the credential to `openclaw-proxy-secrets` (update `deploy.sh`)
+2. Add a `location` block to `manifests/proxy-configmap.yaml`
+3. Add the env var to `manifests/proxy-deployment.yaml`
+4. Redeploy with `./deploy.sh`
 
 ## Configure
 
