@@ -11,7 +11,11 @@ data:
   docker-entrypoint.sh: |
     #!/bin/sh
     set -e
-    envsubst '${ANTHROPIC_API_KEY} ${OPENAI_API_KEY} ${GEMINI_API_KEY} ${OPENROUTER_API_KEY} ${GITHUB_TOKEN} ${TELEGRAM_BOT_TOKEN}' \
+    # Extract the cluster DNS resolver from /etc/resolv.conf so nginx
+    # can resolve upstream hostnames at request time (not just startup).
+    NAMESERVER=$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf)
+    export NAMESERVER
+    envsubst '${NAMESERVER} ${ANTHROPIC_API_KEY} ${OPENAI_API_KEY} ${GEMINI_API_KEY} ${OPENROUTER_API_KEY} ${GITHUB_TOKEN} ${TELEGRAM_BOT_TOKEN}' \
       < /etc/nginx/templates/default.conf.template \
       > /etc/nginx/conf.d/default.conf
     exec nginx -g 'daemon off;'
@@ -29,14 +33,16 @@ data:
     # receives the raw API keys.
     # ---------------------------------------------------------------
 
-    # Deny all traffic that does not match a location block.
+    # Resolve upstream hostnames at request time, not at startup.
+    # ${NAMESERVER} is injected by the entrypoint from /etc/resolv.conf.
+    resolver ${NAMESERVER} valid=30s ipv6=off;
+
     server {
         listen 8080 default_server;
         location / {
             return 403 '{"error":"no matching proxy route"}\n';
         }
 
-        # Health check for readiness/liveness probes.
         location = /healthz {
             return 200 'ok\n';
         }
@@ -45,18 +51,17 @@ data:
         # LLM: Anthropic
         # ----------------------------------------------------------
         location /anthropic/ {
-            # POST only — inference endpoints.
             limit_except POST { deny all; }
 
-            proxy_pass https://api.anthropic.com/;
+            set $upstream_anthropic api.anthropic.com;
+            rewrite ^/anthropic/(.*) /$1 break;
+            proxy_pass https://$upstream_anthropic;
             proxy_ssl_server_name on;
 
             proxy_set_header Host api.anthropic.com;
             proxy_set_header x-api-key "${ANTHROPIC_API_KEY}";
             proxy_set_header anthropic-version "2023-06-01";
-
             proxy_set_header X-Forwarded-For "";
-            proxy_pass_request_headers on;
         }
 
         # ----------------------------------------------------------
@@ -65,14 +70,14 @@ data:
         location /openai/ {
             limit_except POST { deny all; }
 
-            proxy_pass https://api.openai.com/;
+            set $upstream_openai api.openai.com;
+            rewrite ^/openai/(.*) /$1 break;
+            proxy_pass https://$upstream_openai;
             proxy_ssl_server_name on;
 
             proxy_set_header Host api.openai.com;
             proxy_set_header Authorization "Bearer ${OPENAI_API_KEY}";
-
             proxy_set_header X-Forwarded-For "";
-            proxy_pass_request_headers on;
         }
 
         # ----------------------------------------------------------
@@ -81,14 +86,14 @@ data:
         location /gemini/ {
             limit_except POST { deny all; }
 
-            proxy_pass https://generativelanguage.googleapis.com/;
+            set $upstream_gemini generativelanguage.googleapis.com;
+            rewrite ^/gemini/(.*) /$1 break;
+            proxy_pass https://$upstream_gemini;
             proxy_ssl_server_name on;
 
             proxy_set_header Host generativelanguage.googleapis.com;
             proxy_set_header x-goog-api-key "${GEMINI_API_KEY}";
-
             proxy_set_header X-Forwarded-For "";
-            proxy_pass_request_headers on;
         }
 
         # ----------------------------------------------------------
@@ -97,14 +102,14 @@ data:
         location /openrouter/ {
             limit_except POST { deny all; }
 
-            proxy_pass https://openrouter.ai/api/;
+            set $upstream_openrouter openrouter.ai;
+            rewrite ^/openrouter/(.*) /api/$1 break;
+            proxy_pass https://$upstream_openrouter;
             proxy_ssl_server_name on;
 
             proxy_set_header Host openrouter.ai;
             proxy_set_header Authorization "Bearer ${OPENROUTER_API_KEY}";
-
             proxy_set_header X-Forwarded-For "";
-            proxy_pass_request_headers on;
         }
 
         # ----------------------------------------------------------
@@ -113,15 +118,15 @@ data:
         location /github/ {
             limit_except GET HEAD OPTIONS { deny all; }
 
-            proxy_pass https://api.github.com/;
+            set $upstream_github api.github.com;
+            rewrite ^/github/(.*) /$1 break;
+            proxy_pass https://$upstream_github;
             proxy_ssl_server_name on;
 
             proxy_set_header Host api.github.com;
             proxy_set_header Authorization "token ${GITHUB_TOKEN}";
             proxy_set_header User-Agent "openclaw-proxy";
-
             proxy_set_header X-Forwarded-For "";
-            proxy_pass_request_headers on;
         }
 
         # ----------------------------------------------------------
@@ -130,12 +135,12 @@ data:
         location /telegram/ {
             limit_except POST { deny all; }
 
-            proxy_pass https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/;
+            set $upstream_telegram api.telegram.org;
+            rewrite ^/telegram/(.*) /bot${TELEGRAM_BOT_TOKEN}/$1 break;
+            proxy_pass https://$upstream_telegram;
             proxy_ssl_server_name on;
 
             proxy_set_header Host api.telegram.org;
-
             proxy_set_header X-Forwarded-For "";
-            proxy_pass_request_headers on;
         }
     }
