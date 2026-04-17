@@ -1,3 +1,14 @@
+---
+
+> [!WARNING]
+> ## ⚠️ THIS PROJECT WAS CREATED AS EARLY PROTOTYPE
+>
+> All further development has moved to the new OpenClaw Operator:
+>
+> ### 👉 [https://github.com/codeready-toolchain/claw-operator](https://github.com/codeready-toolchain/claw-operator)
+
+---
+
 # OpenClaw on OpenShift
 
 Deploy [OpenClaw](https://github.com/openclaw/openclaw) to an existing OpenShift namespace.
